@@ -13,8 +13,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
 const ATTENDANCE_STATUSES = ['PRESENT', 'ABSENT'];
-const isDateStr = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(new Date(s))
-    && new Date(s).toISOString().slice(0, 10) === s;
 
 // Shared: validate :classId and load the class, or send 400/404 and return null
 const loadClass = async (req, res) => {
@@ -35,7 +33,6 @@ app.get('/api/classes/:classId/students', async (req, res) => {
     if (!cls) return;
 
     const { status } = req.query;
-    if (status === undefined || status === '') return res.status(400).json({ error: 'Status is required' });
     if (!['enrolled', 'dropped'].includes(status)) return res.status(400).json({ error: `Invalid status: ${status}` });
 
     const ids = cls.enrollments.filter(e => e.status === status).map(e => e.studentId);
@@ -102,8 +99,7 @@ app.post('/api/classes/:classId/attendances', async (req, res) => {
     if (!cls) return;
 
     const { date, records } = req.body ?? {};
-    if (date === undefined || date === null || date === '') return res.status(400).json({ error: 'Date is required' });
-    if (!isDateStr(date)) return res.status(400).json({ error: `Invalid date: ${date}` });
+    if (!date) return res.status(400).json({ error: 'Date is required' });
     const sessionDate = new Date(date);
     if (sessionDate > new Date()) return res.status(400).json({ error: 'Date cannot be in the future' });
 
@@ -111,21 +107,19 @@ app.post('/api/classes/:classId/attendances', async (req, res) => {
 
     // Validate everything before writing -> nothing is saved if one record is invalid
     const enrolled = cls.enrollments.filter(e => e.status === 'enrolled').map(e => String(e.studentId));
-    const members = new Set(enrolled);
-    const seen = new Set();
-    for (const r of records) {
-        const studentId = r?.studentId;
-        if (!members.has(String(studentId))) return res.status(400).json({ error: `Student ${studentId} does not belong to class` });
-        if (seen.has(String(studentId))) return res.status(400).json({ error: `Duplicate student ${studentId} in records` });
-        seen.add(String(studentId));
-        if (!ATTENDANCE_STATUSES.includes(r.status)) return res.status(400).json({ error: `Invalid status: ${r.status}` });
+    const submitted = records.map(r => String(r.studentId));
+
+    const missingId = enrolled.find(id => !submitted.includes(id));
+    if (missingId) {
+        const s = await Student.findById(missingId).lean();
+        return res.status(400).json({ error: `Missing attendance for student ${s.studentCode} (${s.fullName})` });
     }
 
-    const missingIds = enrolled.filter(id => !seen.has(id));
-    if (missingIds.length) {
-        const s = await Student.findById(missingIds[0]).lean();
-        return res.status(400).json({ error: `Missing attendance for student ${s?.studentCode ?? missingIds[0]} (${s?.fullName ?? 'unknown'})` });
-    }
+    const notMember = submitted.find(id => !enrolled.includes(id));
+    if (notMember) return res.status(400).json({ error: `Student ${notMember} does not belong to class` });
+
+    const badStatus = records.find(r => !ATTENDANCE_STATUSES.includes(r.status));
+    if (badStatus) return res.status(400).json({ error: `Invalid status: ${badStatus.status}` });
 
     const writeResult = await Attendance.bulkWrite(records.map(r => ({
         updateOne: {
@@ -146,10 +140,7 @@ app.post('/api/classes/:classId/attendances', async (req, res) => {
     res.status(201).json(result);
 });
 
-app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
-
 app.use((err, req, res, next) => {
-    if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON body' });
     if (err.name === 'ValidationError' || err.name === 'CastError') return res.status(400).json({ error: err.message });
     res.status(500).json({ error: err.message });
 });

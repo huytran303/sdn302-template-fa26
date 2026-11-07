@@ -22,7 +22,6 @@ app.get('/api', (req, res) => {
 // Q1: GET /api/subjects?status=ACTIVE
 app.get('/api/subjects', async (req, res) => {
     const { status } = req.query;
-    if (status === undefined || status === '') return res.status(400).json({ error: 'Status is required' });
     if (!['ACTIVE', 'INACTIVE'].includes(status)) return res.status(400).json({ error: `Invalid status: ${status}` });
 
     const subjects = await Subject.find({ status }).lean();
@@ -72,7 +71,6 @@ app.patch('/api/attendances/:attendanceId', async (req, res) => {
     const attendance = await Attendance.findById(attendanceId);
     if (!attendance) return res.status(404).json({ error: `Attendance with id = ${attendanceId} not found` });
 
-    if (status === undefined || status === null || status === '') return res.status(400).json({ error: 'Status is required' });
     if (!ATTENDANCE_STATUSES.includes(status)) return res.status(400).json({ error: `Invalid status: ${status}` });
 
     if (Date.now() - attendance.date.getTime() > 2 * DAY_MS)
@@ -101,7 +99,6 @@ app.post('/api/classes/:classId/attendances', async (req, res) => {
 
     if (!date) return res.status(400).json({ error: 'Date is required' });
     const sessionDate = new Date(date);
-    if (typeof date !== 'string' || isNaN(sessionDate)) return res.status(400).json({ error: `Invalid date: ${date}` });
     if (sessionDate > new Date()) return res.status(400).json({ error: 'Date cannot be in the future' });
 
     if (!Array.isArray(records) || records.length === 0) return res.status(400).json({ error: 'Records are required and cannot be empty' });
@@ -110,22 +107,17 @@ app.post('/api/classes/:classId/attendances', async (req, res) => {
 
     // Validate every record before writing anything -> nothing is saved if one is invalid
     const members = new Set(cls.enrollments.filter(e => e.status === 'enrolled').map(e => String(e.studentId)));
-    const seen = new Set();
-    for (const r of records) {
-        const studentId = r?.studentId;
-        if (!members.has(String(studentId))) return res.status(400).json({ error: `Student ${studentId} does not belong to class` });
-        if (seen.has(String(studentId))) return res.status(400).json({ error: `Duplicate student ${studentId} in records` });
-        seen.add(String(studentId));
-        if (!ATTENDANCE_STATUSES.includes(r.status)) return res.status(400).json({ error: `Invalid status: ${r.status}` });
-    }
+    const notMember = records.find(r => !members.has(String(r.studentId)));
+    if (notMember) return res.status(400).json({ error: `Student ${notMember.studentId} does not belong to class` });
+
+    const badStatus = records.find(r => !ATTENDANCE_STATUSES.includes(r.status));
+    if (badStatus) return res.status(400).json({ error: `Invalid status: ${badStatus.status}` });
 
     if (await Attendance.exists({ classId, date: sessionDate }))
         return res.status(409).json({ error: `Attendance for date ${date} already exists in this class` });
 
     const students = await Student.find({ _id: { $in: records.map(r => r.studentId) } }).lean();
     const byId = new Map(students.map(s => [String(s._id), s]));
-    const missing = records.find(r => !byId.has(String(r.studentId)));
-    if (missing) return res.status(400).json({ error: `Student ${missing.studentId} not found` });
 
     await Attendance.insertMany(records.map(r => ({ studentId: r.studentId, classId, date: sessionDate, status: r.status })));
     const present = records.filter(r => r.status === 'PRESENT').length;
@@ -143,10 +135,7 @@ app.post('/api/classes/:classId/attendances', async (req, res) => {
     res.status(201).json(result);
 });
 
-app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
-
 app.use((err, req, res, next) => {
-    if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON body' });
     if (err.name === 'ValidationError' || err.name === 'CastError') return res.status(400).json({ error: err.message });
     res.status(500).json({ error: err.message });
 });
