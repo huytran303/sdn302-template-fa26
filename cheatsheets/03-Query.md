@@ -1,71 +1,92 @@
 # 03 · Query Mongoose (CRUD, lọc, phân trang, cập nhật mảng, populate)
 
 Mọi ví dụ đều là **Mongoose** (`await Model.xxx()`), không phải mongosh (`db.books.find()`).
+Mọi kết quả `→` bên dưới đã chạy thật trên bộ data mẫu này (id viết tắt `b1`... cho dễ đọc; đề thật là ObjectId).
+
+## Data mẫu (dùng cho mục 1-5)
+
+```js
+// collection books
+{ _id: 'b1', title: 'Mat Biec',       price: 100, genre: 'Novel', tags: ['sale', 'new'], stock: 5,  sold: 8 }
+{ _id: 'b2', title: 'Hoa Vang',       price: 80,  genre: 'Novel', tags: ['new'],         stock: 10, sold: 3 }
+{ _id: 'b3', title: 'Norwegian Wood', price: 200, genre: 'Novel', tags: [],              stock: 2,  sold: 2, discount: 10 }
+{ _id: 'b4', title: 'Clean Code',     price: 350, genre: 'Tech',  tags: ['sale'],        stock: 0,  sold: 12 }
+```
 
 ## Tra nhanh
 
-| Cần | Gọi | Trả về |
+| Cần | Gọi | Kết quả với data mẫu |
 |---|---|---|
-| Tất cả / có điều kiện | `Book.find(filter)` | mảng (có thể `[]`) |
-| Một document | `Book.findOne(filter)` / `Book.findById(id)` | doc hoặc `null` |
-| Có tồn tại không | `Book.exists(filter)` | `{ _id }` hoặc `null` |
-| Đếm | `Book.countDocuments(filter)` | số |
-| Các giá trị khác nhau | `Book.distinct('genre', filter)` | mảng |
-| Thêm | `Book.create(obj)` / `Book.insertMany(arr)` | doc / mảng doc |
-| Sửa + lấy doc | `Book.findByIdAndUpdate(id, upd, { returnDocument: 'after', runValidators: true })` | doc hoặc `null` |
-| Sửa, chỉ cần số lượng | `Book.updateOne(f, upd)` / `updateMany` | `{ matchedCount, modifiedCount }` |
-| Xóa + lấy doc | `Book.findByIdAndDelete(id)` | doc hoặc `null` |
-| Xóa, chỉ cần số lượng | `Book.deleteOne(f)` / `deleteMany(f)` | `{ deletedCount }` |
+| Tất cả / có điều kiện | `Book.find({ genre: 'Tech' })` | `[ {b4...} ]` (không khớp → `[]`) |
+| Một document | `Book.findById('b1')` / `Book.findOne({ genre: 'Novel' })` | `{b1...}` (không có → `null`) |
+| Có tồn tại không | `Book.exists({ title: 'Mat Biec' })` | `{ _id: 'b1' }` (không có → `null`) |
+| Đếm | `Book.countDocuments({ genre: 'Novel' })` | `3` |
+| Các giá trị khác nhau | `Book.distinct('genre')` | `['Novel', 'Tech']` |
+| Thêm | `Book.create(obj)` / `Book.insertMany(arr)` | doc vừa tạo (có `_id`) / mảng doc |
+| Sửa + lấy doc | `Book.findByIdAndUpdate(id, upd, { returnDocument: 'after', runValidators: true })` | doc **sau** khi sửa, hoặc `null` |
+| Sửa, chỉ cần số lượng | `Book.updateOne(f, upd)` / `updateMany` | `{ matchedCount: 1, modifiedCount: 1, ... }` |
+| Xóa + lấy doc | `Book.findByIdAndDelete(id)` | doc vừa xóa, hoặc `null` |
+| Xóa, chỉ cần số lượng | `Book.deleteOne(f)` / `deleteMany(f)` | `{ deletedCount: 1 }` |
 
 Nối tiếp sau `find`: `.select()` `.sort()` `.skip()` `.limit()` `.populate()` `.lean()`.
 
-## 1. Toán tử lọc
+## 1. Toán tử lọc: viết filter nào → ra document nào
+
+`await Book.find(<filter>)` với data mẫu:
+
+| Filter | Đọc là | Khớp |
+|---|---|---|
+| `{ price: 100 }` | price = 100 | b1 |
+| `{ price: { $gt: 80, $lte: 200 } }` | 80 < price ≤ 200 (`$gt $gte $lt $lte`) | b1, b3 |
+| `{ genre: { $ne: 'Novel' } }` | genre ≠ Novel | b4 |
+| `{ genre: { $in: ['Tech', 'Comic'] } }` | genre là 1 trong các giá trị (`$nin` = ngược lại) | b4 |
+| `{ $or: [{ genre: 'Tech' }, { price: { $lt: 90 } }] }` | Tech **hoặc** rẻ hơn 90 | b2, b4 |
+| `{ genre: 'Novel', price: { $gte: 100 } }` | nhiều key = **và** (không cần `$and`) | b1, b3 |
+| `{ discount: { $exists: true } }` | có field discount | b3 |
+| `{ tags: 'sale' }` | mảng tags **chứa** 'sale' | b1, b4 |
+| `{ tags: { $all: ['sale', 'new'] } }` | chứa **cả hai** | b1 |
+| `{ tags: { $size: 0 } }` | mảng rỗng | b3 |
+| `{ $expr: { $gt: ['$sold', '$stock'] } }` | so 2 field: sold > stock | b1, b4 |
+| `{ title: { $regex: 'co', $options: 'i' } }` | title chứa "co", không phân biệt hoa thường | b4 |
+| `{ 'address.city': 'HN' }` | field lồng: đường dẫn có dấu chấm, phải để trong nháy | — |
+
+`$and` chỉ cần khi 2 điều kiện cùng key không gộp được, vd 2 cái `$or`: `{ $and: [{ $or: [...] }, { $or: [...] }] }`.
+
+Lọc theo khoảng ngày (trọn 1 ngày 01/05/2024):
 
 ```js
-{ price: 100 }                                   // bằng
-{ price: { $gt: 10, $lte: 50 } }                 // $gt $gte $lt $lte $ne
-{ genre: { $in: ['A', 'B'] } }                   // $in / $nin
-{ $or: [{ genre: 'A' }, { price: { $lt: 10 } }] }
-{ $and: [{ price: { $gte: 10 } }, { price: { $lte: 50 } }] }
-{ discount: { $exists: true } }
-{ 'address.city': 'HN' }                         // field lồng: đường dẫn có dấu chấm, để trong nháy
-{ tags: 'sale' }                                 // mảng chứa giá trị
-{ tags: { $all: ['sale', 'new'] } }              // mảng chứa tất cả
-{ tags: { $size: 2 } }                           // độ dài mảng
-{ $expr: { $gt: ['$sold', '$stock'] } }          // so sánh 2 field với nhau
-```
-
-Lọc theo khoảng ngày (trọn 1 ngày):
-
-```js
-const start = new Date('2024-05-01T00:00:00Z');
-const end   = new Date('2024-05-02T00:00:00Z');
-{ createdAt: { $gte: start, $lt: end } }
+{ createdAt: { $gte: new Date('2024-05-01T00:00:00Z'), $lt: new Date('2024-05-02T00:00:00Z') } }
+// 2024-05-01T23:59:59Z → khớp;  2024-05-02T00:00:00Z → không khớp
 ```
 
 ## 2. Tìm theo từ khóa (không phân biệt hoa thường, an toàn)
 
 ```js
+// GET /books?q=co&minPrice=100
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');  // tránh ký tự đặc biệt của regex
 const filter = {};
 if (req.query.q) filter.title = { $regex: escape(req.query.q), $options: 'i' };
 if (req.query.minPrice) filter.price = { $gte: Number(req.query.minPrice) };
-const books = await Book.find(filter);
+// filter = { title: { $regex: 'co', $options: 'i' }, price: { $gte: 100 } }
+const books = await Book.find(filter);   // → [ {b4 Clean Code} ]
 ```
 
 ## 3. Chọn field, sắp xếp
 
 ```js
-Book.find().select('title price -_id')           // lấy title, price; bỏ _id
-Book.find().select('-__v')                       // bỏ 1 field
-Book.find({}, { title: 1, price: 1 })            // tương tự, dạng object
-Book.find().sort({ price: -1, title: 1 })        // -1 giảm, 1 tăng; trùng thì xét key thứ 2
-Book.find().sort({ price: -1 }).limit(5)         // top 5
+await Book.find().select('title price -_id').sort({ price: -1 }).limit(2);
+// → [ { title: 'Clean Code', price: 350 }, { title: 'Norwegian Wood', price: 200 } ]
+
+Book.find().select('-__v')                       // bỏ 1 field, giữ lại tất cả field khác
+Book.find({}, { title: 1, price: 1 })            // dạng object: → [{ _id: 'b1', title, price }, ...] (_id mặc định có)
+Book.find().sort({ genre: 1, price: -1 })        // genre A→Z; cùng genre thì price giảm dần
+                                                 // → b3(Novel 200), b1(Novel 100), b2(Novel 80), b4(Tech)
 ```
 
 ## 4. Phân trang kèm tổng số
 
 ```js
+// GET /books?page=2&limit=3
 const page = Math.max(1, parseInt(req.query.page, 10) || 1);
 const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
 const [items, total] = await Promise.all([
@@ -73,46 +94,72 @@ const [items, total] = await Promise.all([
   Book.countDocuments(filter),
 ]);
 res.json({ page, limit, total, totalPages: Math.ceil(total / limit), items });
+// → { page: 2, limit: 3, total: 4, totalPages: 2, items: [ {b4...} ] }   (trang 1 là b1, b2, b3)
 ```
 
 ## 5. Toán tử cập nhật và mảng
 
+`await Book.updateOne({ _id: 'b1' }, <update>)`, trước mỗi lệnh b1 là:
+`{ _id: 'b1', price: 100, stock: 5, tags: ['sale', 'new'], discount: 5 }`
+
+| Update | b1 sau khi chạy |
+|---|---|
+| `{ $set: { price: 120 } }` | `price: 120` |
+| `{ $inc: { stock: -1 } }` | `stock: 4` (cộng/trừ số) |
+| `{ $unset: { discount: '' } }` | field `discount` biến mất |
+| `{ $push: { tags: 'new' } }` | `tags: ['sale', 'new', 'new']` (cho phép trùng) |
+| `{ $addToSet: { tags: 'new' } }` | `tags: ['sale', 'new']` (đã có → không đổi, `modifiedCount: 0`) |
+| `{ $addToSet: { tags: 'hot' } }` | `tags: ['sale', 'new', 'hot']` |
+| `{ $pull: { tags: 'sale' } }` | `tags: ['new']` |
+
+### Mảng subdocument
+
+Trước mỗi lệnh:
+
 ```js
-await Book.updateOne({ _id: id }, { $set: { price: 120 } });
-await Book.updateOne({ _id: id }, { $inc: { stock: -1 } });        // cộng / trừ số
-await Book.updateOne({ _id: id }, { $unset: { discount: '' } });   // xóa field
-await Book.updateOne({ _id: id }, { $push: { tags: 'new' } });     // thêm cuối (cho phép trùng)
-await Book.updateOne({ _id: id }, { $addToSet: { tags: 'new' } }); // thêm nếu chưa có
-await Book.updateOne({ _id: id }, { $pull: { tags: 'old' } });     // xóa phần tử khớp
+{ _id: 'c1', name: 'SDN302', status: 'OPEN',
+  enrollments: [ { student: 's1', status: 'ENROLLED' }, { student: 's2', status: 'ENROLLED' } ] }
+```
 
-// Mảng subdocument
-await Class.updateOne({ _id: classId }, { $push: { enrollments: { student: sid, status: 'ENROLLED' } } });
-await Class.updateOne({ _id: classId }, { $pull: { enrollments: { student: sid } } });
+```js
+// Thêm phần tử
+await Class.updateOne({ _id: 'c1' }, { $push: { enrollments: { student: 's3', status: 'ENROLLED' } } });
+// → enrollments: [ {s1 ENROLLED}, {s2 ENROLLED}, {s3 ENROLLED} ]
 
-// Sửa ĐÚNG 1 phần tử khớp: toán tử vị trí $
+// Xóa phần tử khớp
+await Class.updateOne({ _id: 'c1' }, { $pull: { enrollments: { student: 's1' } } });
+// → enrollments: [ {s2 ENROLLED} ]
+
+// Sửa ĐÚNG phần tử khớp: filter chỉ ra phần tử nào, `$` = vị trí của phần tử đó
 await Class.updateOne(
-  { _id: classId, 'enrollments.student': sid },
+  { _id: 'c1', 'enrollments.student': 's2' },
   { $set: { 'enrollments.$.status': 'DROPPED' } },
 );
+// → enrollments: [ {s1 ENROLLED}, {s2 DROPPED} ]
 
-// Một phần tử phải khớp cùng lúc 2+ điều kiện
-await Class.find({ enrollments: { $elemMatch: { student: sid, status: 'ENROLLED' } } });
+// Tìm: CÙNG MỘT phần tử phải khớp 2+ điều kiện
+await Class.find({ enrollments: { $elemMatch: { student: 's2', status: 'ENROLLED' } } });  // → [c1]
+// Khác với { 'enrollments.student': 's2', 'enrollments.status': 'DROPPED' }:
+// dạng này mỗi điều kiện có thể khớp phần tử KHÁC NHAU
 
-// Upsert: không có thì thêm mới
+// Upsert: không có thì thêm mới, có rồi thì sửa
 await Attendance.findOneAndUpdate(
-  { student: sid, date },
+  { studentId: 's9', date: '2024-05-01' },
   { $set: { status: 'PRESENT' } },
   { upsert: true, returnDocument: 'after', runValidators: true },
 );
+// lần 1 (chưa có) → tạo mới { _id: ..., studentId: 's9', date: '2024-05-01', status: 'PRESENT' }
+// lần 2 với ABSENT → sửa chính doc đó (cùng _id), status: 'ABSENT'
 ```
 
 Nghiệp vụ "không được trùng trong mảng" → kiểm tra trước, hoặc dùng `$addToSet` / điều kiện chặn ngay trong filter:
 
 ```js
 const r = await Class.updateOne(
-  { _id: classId, status: { $ne: 'CLOSED' }, 'enrollments.student': { $ne: sid } },
-  { $push: { enrollments: { student: sid } } },
+  { _id: 'c1', status: { $ne: 'CLOSED' }, 'enrollments.student': { $ne: 's1' } },
+  { $push: { enrollments: { student: 's1' } } },
 );
+// s1 đã có trong c1 → filter không khớp → r = { matchedCount: 0, modifiedCount: 0 }, không push
 if (r.matchedCount === 0) return res.status(400).json({ error: 'Class closed, missing, or already enrolled' });
 ```
 

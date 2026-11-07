@@ -14,8 +14,9 @@ Setup đầu giờ thi (import JSON, sinh `models.js`, gọi `connectDb`): xem [
 | Cập nhật mảng (`$push`, `$pull`, mảng nhúng) | [03-Query](03-Query.md) | 5 |
 | Join để hiển thị (`populate`) | [03-Query](03-Query.md) | 6 |
 | Báo cáo: đếm / tổng / trung bình / nhóm / join + tính toán | [04-Aggregate](04-Aggregate.md) | toàn bộ |
-| Biến đổi kết quả bằng JS (`map`, `reduce`, nhóm) | [05-JS](05-JS.md) | 1-4 |
-| Format tiền / ngày / phần trăm | [05-JS](05-JS.md) | 5 |
+| Biến đổi kết quả bằng JS (`map`, `reduce`, nhóm) | [05-JS](05-JS.md) | 1-3 |
+| Format số / tiền / ngày / phần trăm / `90.0` | [05-JS](05-JS.md) | 4 |
+| Validate input, format lỗi `ValidationError` | [05-JS](05-JS.md) | 5 |
 | Đăng nhập / token (chỉ khi đề cho sẵn `jsonwebtoken`) | [06-JWT](06-JWT.md) | toàn bộ |
 
 ## Quy tắc chọn cách làm
