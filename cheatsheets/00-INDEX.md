@@ -16,7 +16,8 @@ Setup đầu giờ thi (import JSON, sinh `models.js`, gọi `connectDb`): xem [
 | Báo cáo: đếm / tổng / trung bình / nhóm / join + tính toán | [04-Aggregate](04-Aggregate.md) | toàn bộ |
 | Biến đổi kết quả bằng JS (`map`, `reduce`, nhóm) | [05-JS](05-JS.md) | 1-3 |
 | Format số / tiền / ngày / phần trăm / `90.0` | [05-JS](05-JS.md) | 4 |
-| Validate input, format lỗi `ValidationError` | [05-JS](05-JS.md) | 5 |
+| Validate input, ghép lỗi thành chuỗi, format lỗi `ValidationError` | [05-JS](05-JS.md) | 5 |
+| Nối chuỗi, `join`, `split`, bỏ dấu, viết hoa | [05-JS](05-JS.md) | 6 |
 | Đăng nhập / token (chỉ khi đề cho sẵn `jsonwebtoken`) | [06-JWT](06-JWT.md) | toàn bộ |
 
 ## Quy tắc chọn cách làm
