@@ -3,7 +3,7 @@ const morgan = require('morgan');
 const mongoose = require('mongoose');
 const { connectDb } = require('./dal/database');
 const { Attendance, Class, Student, Subject } = require('./models');
-const isValidId = (id) => mongoose.isObjectIdOrHexString(id);
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 require('dotenv').config();
 
